@@ -1,14 +1,18 @@
 package main
 
 import (
-	"fmt"
+	"log"
 	"net"
 	"strings"
 )
 
 const (
 	END_BYTES = "\000\001\002\003\004\005" //информация об окончании передачи данных для сервера
-	PORT      = ":8080"
+	PORT      = ":8080"                    //порт
+)
+
+var (
+	Connections = make(map[net.Conn]bool) //хранит соединения клиетов
 )
 
 func main() {
@@ -32,29 +36,41 @@ func main() {
 }
 
 func handleConnect(conn net.Conn) {
-	defer conn.Close() //завершить соединение по окончанию функции
+	Connections[conn] = true //добавляет connection
 	var (
 		buffer  = make([]byte, 512) //сохранение промежуточного результата до 512 байт
 		message string              //результат который мы приняли от сервера
-
 	)
-	//цикл при помощи которого мы будем читать данные и заносить их в буфер, а из буфера заносить в сообщение
+	//бесконечный цикл открытого соединения
+close:
 	for {
-		length, err := conn.Read(buffer) //указывает буфер, куда будут заноситься данные
-		if length == 0 || err != nil {   //проверка длины, чтобы не равнялась нулю и обработка ошибки
-			break
+		//чтобы строка не накапливала промежуточный результат
+		message = ""
+		//цикл при помощи которого мы будем читать данные и заносить их в буфер, а из буфера заносить в сообщение
+		for {
+			length, err := conn.Read(buffer) //указывает буфер, куда будут заноситься данные
+			if err != nil {
+				break close
+			} //закрывает соединение
+			//если все хорошо, заносим в сообщение содержимое буфера до конца length и переводим в строку
+			message += string(buffer[:length])
+			//проверка находятся ли байты окончания в конце сообщения
+			if strings.HasSuffix(message, END_BYTES) {
+				message = strings.TrimSuffix(message, END_BYTES)
+				break
+			}
 		}
-		//если все хорошо, заносим в сообщение содержимое буфера до конца length и переводим в строку
-		message += string(buffer[:length])
-		//проверка находятся ли байты окончания в конце сообщения
-		if strings.HasSuffix(message, END_BYTES) {
-			message = strings.TrimSuffix(message, END_BYTES)
-			break
+		//логирует введенные клиентом сообщения на сервер
+		log.Println(message)
+		//отправка сообщения всем остальным пользователям
+		for c := range Connections {
+			if c == conn {
+				continue
+			} //если это отправляюший пользователь, то пропускаем
+			conn.Write([]byte(strings.ToUpper(message) + END_BYTES)) //переводит message в UpperCase с условием конца строки
 		}
 	}
-	//выводит введенные клиентом сообщения на сервер 
-	fmt.Println(message)
-	//переводит message в  UpperCase
-	conn.Write([]byte(strings.ToUpper(message)))
+	delete(Connections, conn) //удаление соединения
 }
+
 //TODO 22:30 ДОДЕЛАТЬ!
